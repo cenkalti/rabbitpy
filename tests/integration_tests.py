@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+import threading
 try:
     import unittest2 as unittest
 except ImportError:
@@ -163,6 +164,49 @@ class PublishAndConsumeIteratorTest(unittest.TestCase):
             msg.ack()
             self.queue.stop_consuming()
         self.assertFalse(self.queue.consuming)
+
+
+class StopConsumigThreadTest(unittest.TestCase):
+
+    def setUp(self):
+        self.connection = rabbitpy.Connection()
+        self.channel = self.connection.channel()
+        self.exchange = rabbitpy.TopicExchange(self.channel, 'test-sctt')
+        self.exchange.declare()
+        self.queue = rabbitpy.Queue(self.channel, 'sctt-queue')
+        self.queue.declare()
+        self.queue.bind(self.exchange, 'test.#')
+
+        self.app_id = 'StopConsumigThreadTest'
+        self.message_body = 'ABC1234567890'
+        self.message_type = 'test'
+
+        self.msg = rabbitpy.Message(self.channel,
+                                    self.message_body,
+                                    {'app_id': self.app_id,
+                                     'message_id': str(uuid.uuid4()),
+                                     'timestamp': int(time.time()),
+                                     'message_type': self.message_type})
+        self.msg.publish(self.exchange, 'test.publish.consume')
+
+    def tearDown(self):
+        self.queue.delete()
+        self.exchange.delete()
+
+    def wait_and_stop_consuming(self):
+        time.sleep(1)
+        self.queue.stop_consuming()
+
+    def test_stop_consuming(self):
+        stopper = threading.Thread(target=self.wait_and_stop_consuming)
+        for msg in self.queue:
+            if msg is None:
+                break
+            self.assertEqual(msg.body.decode('utf-8'), self.message_body)
+            msg.ack()
+            stopper.start()
+        self.assertFalse(self.queue.consuming)
+        stopper.join()
 
 
 class RedeliveredFlagTest(unittest.TestCase):
